@@ -1,3 +1,9 @@
+/*********
+ * Modification of app.c file from empty-soc project a dtm project file
+ * from silicon labs.
+ *
+ */
+
 /***************************************************************************//**
  * @file app.c
  * @brief Silicon Labs Empty Example Project
