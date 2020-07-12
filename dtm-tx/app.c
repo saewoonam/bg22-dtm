@@ -34,7 +34,8 @@
 
 #include "app.h"
 
-#define TX
+//#define TX
+#define RX
 
 #define ONE_S (32768U)
 #define TEST_DURATION_TIMER (1)
@@ -298,57 +299,59 @@ void init_GPIO(void) {
 void do_test() {
 	uint8 ch = 1;
 	uint8 phy = 1;
-    //  Set up tx and rx test parameters
-    dtm_test_data.test_duration = 10*ONE_S;
-    dtm_test_data.tx_cmd.packet_type = 1;
-    dtm_test_data.tx_cmd.length = 8;
-    dtm_test_data.tx_cmd.channel = ch;
-    dtm_test_data.tx_cmd.phy = phy;
-    dtm_test_data.rx_cmd.channel = ch;
-    dtm_test_data.rx_cmd.phy = phy;
+	//  Set up tx and rx test parameters
+	dtm_test_data.test_duration = 10 * ONE_S;
+	dtm_test_data.tx_cmd.packet_type = 1;
+	dtm_test_data.tx_cmd.length = 8;
+	dtm_test_data.tx_cmd.channel = ch;
+	dtm_test_data.tx_cmd.phy = phy;
+	dtm_test_data.rx_cmd.channel = ch;
+	dtm_test_data.rx_cmd.phy = phy;
 
-        uint8 cte_length = 0x02;
-        uint8 cte_type = 0;
-        uint8 duration = 1;
-        uint8 pattern_len = 1;
-        uint8 pattern[1] = {0};
-        uint16 response;
-#ifdef TX
-        response = (gecko_cmd_cte_transmitter_set_dtm_parameters(cte_length,
-        		cte_type,
-				pattern_len,
-				pattern))->result;
-		printf("cte transmitter_set dtm result 0x%x\r\n", response);
-#else
-		response = (gecko_cmd_cte_receiver_set_dtm_parameters(cte_length,
-        		cte_type,
-				duration,
-				pattern_len,
-				pattern))->result;
-		printf("cte receiver_set dtm result 0x%x\r\n", response);
+	uint8 cte_length = 0x02;
+	uint8 cte_type = 0;
+#ifdef RX
+	uint8 duration = 1;
 #endif
-        gecko_cmd_hardware_set_soft_timer( dtm_test_data.test_duration,
-                                           TEST_DURATION_TIMER,
-                                           true );
-
-        /* Switch on LED 0 */
-        GPIO_PinOutSet(BSP_LED0_PORT, BSP_LED0_PIN);
+	uint8 pattern_len = 1;
+	uint8 pattern[1] = { 0 };
+	uint16 response;
 #ifdef TX
-        printf("\rTX args :\n\rpkt_type -> %d; length -> %d; channel -> %d; phy -> %s\n\r",
-        		dtm_test_data.tx_cmd.packet_type,
-				dtm_test_data.tx_cmd.length,
-				dtm_test_data.tx_cmd.channel,
-				phy_desc[dtm_test_data.tx_cmd.phy]);
-
-        gecko_cmd_test_dtm_tx( dtm_test_data.tx_cmd.packet_type,
-        		dtm_test_data.tx_cmd.length,
-				dtm_test_data.tx_cmd.channel,
-				dtm_test_data.tx_cmd.phy );
+	response = (gecko_cmd_cte_transmitter_clear_dtm_parameters())->result;
+	printf("cte transmitter clear dtm result 0x%x\r\n", response);
+	response = (gecko_cmd_cte_transmitter_set_dtm_parameters(cte_length,
+			cte_type, pattern_len, pattern))->result;
+	printf("cte transmitter_set dtm result 0x%x\r\n", response);
 #else
-        printf("\rRX args :\n\rchannel -> %d; phy -> %s\n\r",
-				dtm_test_data.tx_cmd.channel,
-				phy_desc[dtm_test_data.tx_cmd.phy]);
-        gecko_cmd_test_dtm_rx( dtm_test_data.rx_cmd.channel,
-                               dtm_test_data.rx_cmd.phy );
+	response = (gecko_cmd_cte_receiver_clear_dtm_parameters())->result;
+	printf("cte transmitter clear dtm result 0x%x\r\n", response);
+	response = (gecko_cmd_cte_receiver_set_dtm_parameters(cte_length,
+					cte_type,
+					duration,
+					pattern_len,
+					pattern))->result;
+	printf("cte receiver_set dtm result 0x%x\r\n", response);
+#endif
+	gecko_cmd_hardware_set_soft_timer(dtm_test_data.test_duration,
+	TEST_DURATION_TIMER,
+	true);
+
+	/* Switch on LED 0 */
+	GPIO_PinOutSet(BSP_LED0_PORT, BSP_LED0_PIN);
+#ifdef TX
+	printf(
+			"\rTX args :\n\rpkt_type -> %d; length -> %d; channel -> %d; phy -> %s\n\r",
+			dtm_test_data.tx_cmd.packet_type, dtm_test_data.tx_cmd.length,
+			dtm_test_data.tx_cmd.channel, phy_desc[dtm_test_data.tx_cmd.phy]);
+
+	gecko_cmd_test_dtm_tx(dtm_test_data.tx_cmd.packet_type,
+			dtm_test_data.tx_cmd.length, dtm_test_data.tx_cmd.channel,
+			dtm_test_data.tx_cmd.phy);
+#else
+	printf("\rRX args :\n\rchannel -> %d; phy -> %s\n\r",
+			dtm_test_data.tx_cmd.channel,
+			phy_desc[dtm_test_data.tx_cmd.phy]);
+	gecko_cmd_test_dtm_rx( dtm_test_data.rx_cmd.channel,
+			dtm_test_data.rx_cmd.phy );
 #endif
 }
