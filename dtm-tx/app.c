@@ -29,6 +29,8 @@
 #include "bg_types.h"
 #include "native_gecko.h"
 #include "gatt_db.h"
+#include "em_gpio.h"
+#include "gpiointerrupt.h"
 
 #include "app.h"
 
@@ -39,6 +41,9 @@
 
 #define RESPONSE_LEN_BYTES (2)
 #define PHY_NUMBER     (5) /* actually there only 4 options but the enumeration starts at 1 */
+
+#define BUTTON_PRESSED (1 << 0)
+#define BUTTON_RELEASED (1 << 1)
 
 struct dtm_data{
     // eDTM_TYPE eType; /* Best would be to use a status word/register type of thing */
@@ -62,6 +67,8 @@ static const char* phy_desc[PHY_NUMBER] = { "invalid",
 
 /* Print boot message */
 static void bootMessage(struct gecko_msg_system_boot_evt_t *bootevt);
+void do_test();
+void init_GPIO(void);
 
 /* Flag for indicating DFU Reset must be performed */
 static uint8_t boot_to_dfu = 0;
@@ -80,9 +87,14 @@ void appMain(gecko_configuration_t *pconfig)
 
   /* Init LEDs */
   GPIO_PinModeSet(BSP_LED0_PORT,BSP_LED0_PIN,gpioModePushPull,HAL_GPIO_DOUT_HIGH);
+  GPIO_PinOutClear(BSP_LED0_PORT, BSP_LED0_PIN);
 
+  /* Init Button */
+  init_GPIO();
   /* Initialize stack */
   gecko_init(pconfig);
+
+
   printLog("PrintLog\r\n");
   printf("printf\r\n");
   while (1) {
@@ -106,60 +118,12 @@ void appMain(gecko_configuration_t *pconfig)
       case gecko_evt_system_boot_id:
 
         bootMessage(&(evt->data.evt_system_boot));
-        //  Set up tx and rx test parameters
-        dtm_test_data.test_duration = 10*ONE_S;
-        dtm_test_data.tx_cmd.packet_type = 1;
-        dtm_test_data.tx_cmd.length = 8;
-        dtm_test_data.tx_cmd.channel = 0;
-        dtm_test_data.tx_cmd.phy = 1;
-        dtm_test_data.rx_cmd.channel = 0;
-        dtm_test_data.rx_cmd.phy = 1;
-
-
-        uint8 cte_length = 0x14;
-        uint8 cte_type = 0;
-        uint8 duration = 1;
-        uint8 pattern_len = 1;
-        uint8 pattern[1] = {0};
-        uint16 response;
 #ifdef TX
-        response = (gecko_cmd_cte_transmitter_set_dtm_parameters(cte_length,
-        		cte_type,
-				pattern_len,
-				pattern))->result;
-		printf("cte transmitter_set dtm result 0x%x\r\n", response);
+        gecko_bgapi_class_cte_transmitter_init();
 #else
-		response = (gecko_cmd_cte_receiver_set_dtm_parameters(cte_length,
-        		cte_type,
-				duration,
-				pattern_len,
-				pattern))->result;
-		printf("cte receiver_set dtm result 0x%x\r\n", response);
+        gecko_bgapi_class_cte_receiver_init();
 #endif
-        gecko_cmd_hardware_set_soft_timer( dtm_test_data.test_duration,
-                                           TEST_DURATION_TIMER,
-                                           true );
-
-        /* Switch on LED 0 */
-        GPIO_PinOutSet(BSP_LED0_PORT, BSP_LED0_PIN);
-#ifdef TX
-        printf("\rTX args :\n\rpkt_type -> %d; length -> %d; channel -> %d; phy -> %s\n\r",
-        		dtm_test_data.tx_cmd.packet_type,
-				dtm_test_data.tx_cmd.length,
-				dtm_test_data.tx_cmd.channel,
-				phy_desc[dtm_test_data.tx_cmd.phy]);
-
-        gecko_cmd_test_dtm_tx( dtm_test_data.tx_cmd.packet_type,
-        		dtm_test_data.tx_cmd.length,
-				dtm_test_data.tx_cmd.channel,
-				dtm_test_data.tx_cmd.phy );
-#else
-        printf("\rRX args :\n\rchannel -> %d; phy -> %s\n\r",
-				dtm_test_data.tx_cmd.channel,
-				phy_desc[dtm_test_data.tx_cmd.phy]);
-        gecko_cmd_test_dtm_rx( dtm_test_data.rx_cmd.channel,
-                               dtm_test_data.rx_cmd.phy );
-#endif
+        printf("Ready to start test\r\n");
         break;
 
       case gecko_evt_hardware_soft_timer_id:
@@ -202,10 +166,38 @@ void appMain(gecko_configuration_t *pconfig)
               printf("\rNumber of packets received : %d\n\r",
                       dtm_test_data.event.number_of_packets );
 #endif
+              started = false;
     	  }
 
     	  break;
 
+      case gecko_evt_system_external_signal_id:
+	        if (evt->data.evt_system_external_signal.extsignals & BUTTON_PRESSED) {
+	        	printLog("Button Pressed\r\n");
+	        }
+
+	        if (evt->data.evt_system_external_signal.extsignals & BUTTON_RELEASED) {
+	        	printLog("Button released\r\n");
+	        	do_test();
+	        }
+	        break;
+
+      case gecko_evt_cte_receiver_connection_iq_report_id:
+    	  printf("Got recvr connection iq report\r\n");
+    	  break;
+
+      case gecko_evt_cte_receiver_dtm_iq_report_id: {
+    	  struct gecko_msg_cte_receiver_dtm_iq_report_evt_t report = evt->data.evt_cte_receiver_dtm_iq_report;
+    	  // printf("Got dtm iq report\r\n");
+			printf("status: %d, ch: %d, rssi: %d, ant:%d, cte:%d, duration:%d, len:%d\r\n", report.status,
+					report.channel, report.rssi, report.rssi_antenna_id, report.cte_type, report.slot_durations,
+					report.samples.len);
+			for (int i=0; i<report.samples.len; i++) {
+				RETARGET_WriteChar(report.samples.data[i]);
+			}
+			printf("\r\n");
+    	  break;
+      }
       case gecko_evt_le_connection_opened_id:
 
         printLog("connection opened\r\n");
@@ -250,6 +242,7 @@ void appMain(gecko_configuration_t *pconfig)
       /* Add additional event handlers as your application requires */
 
       default:
+    	printf("Unhandled event %lx\r\n", BGLIB_MSG_ID(evt->header));
         break;
     }
   }
@@ -270,5 +263,92 @@ static void bootMessage(struct gecko_msg_system_boot_evt_t *bootevt)
     printLog("%2.2x:", local_addr.addr[5 - i]);
   }
   printLog("%2.2x\r\n", local_addr.addr[0]);
+#endif
+}
+
+
+static void button_callback(const uint8_t pin)
+{
+  if (pin == BSP_BUTTON0_PIN) {
+    /* when input is high, the button was released */
+    if (GPIO_PinInGet(BSP_BUTTON0_PORT,BSP_BUTTON0_PIN)) {
+        gecko_external_signal(BUTTON_RELEASED);
+    }
+    /* when input is low, the button was pressed*/
+    else {
+        gecko_external_signal(BUTTON_PRESSED);
+    }
+  }
+}
+
+void init_GPIO(void) {
+	/* Initialize GPIO interrupt handler */
+	GPIOINT_Init();
+
+	/* Set the pin of Push Button 0 as input with pull-up resistor */
+	GPIO_PinModeSet( BSP_BUTTON0_PORT, BSP_BUTTON0_PIN, HAL_GPIO_MODE_INPUT_PULL_FILTER, HAL_GPIO_DOUT_HIGH );
+
+	/* Enable interrupt on Push Button 0 */
+	GPIO_ExtIntConfig(BSP_BUTTON0_PORT, BSP_BUTTON0_PIN, BSP_BUTTON0_PIN, true, true, true);
+
+	/* Register callback for Push Button 0 */
+	GPIOINT_CallbackRegister(BSP_BUTTON0_PIN, button_callback);
+}
+
+void do_test() {
+	uint8 ch = 1;
+	uint8 phy = 1;
+    //  Set up tx and rx test parameters
+    dtm_test_data.test_duration = 10*ONE_S;
+    dtm_test_data.tx_cmd.packet_type = 1;
+    dtm_test_data.tx_cmd.length = 8;
+    dtm_test_data.tx_cmd.channel = ch;
+    dtm_test_data.tx_cmd.phy = phy;
+    dtm_test_data.rx_cmd.channel = ch;
+    dtm_test_data.rx_cmd.phy = phy;
+
+        uint8 cte_length = 0x02;
+        uint8 cte_type = 0;
+        uint8 duration = 1;
+        uint8 pattern_len = 1;
+        uint8 pattern[1] = {0};
+        uint16 response;
+#ifdef TX
+        response = (gecko_cmd_cte_transmitter_set_dtm_parameters(cte_length,
+        		cte_type,
+				pattern_len,
+				pattern))->result;
+		printf("cte transmitter_set dtm result 0x%x\r\n", response);
+#else
+		response = (gecko_cmd_cte_receiver_set_dtm_parameters(cte_length,
+        		cte_type,
+				duration,
+				pattern_len,
+				pattern))->result;
+		printf("cte receiver_set dtm result 0x%x\r\n", response);
+#endif
+        gecko_cmd_hardware_set_soft_timer( dtm_test_data.test_duration,
+                                           TEST_DURATION_TIMER,
+                                           true );
+
+        /* Switch on LED 0 */
+        GPIO_PinOutSet(BSP_LED0_PORT, BSP_LED0_PIN);
+#ifdef TX
+        printf("\rTX args :\n\rpkt_type -> %d; length -> %d; channel -> %d; phy -> %s\n\r",
+        		dtm_test_data.tx_cmd.packet_type,
+				dtm_test_data.tx_cmd.length,
+				dtm_test_data.tx_cmd.channel,
+				phy_desc[dtm_test_data.tx_cmd.phy]);
+
+        gecko_cmd_test_dtm_tx( dtm_test_data.tx_cmd.packet_type,
+        		dtm_test_data.tx_cmd.length,
+				dtm_test_data.tx_cmd.channel,
+				dtm_test_data.tx_cmd.phy );
+#else
+        printf("\rRX args :\n\rchannel -> %d; phy -> %s\n\r",
+				dtm_test_data.tx_cmd.channel,
+				phy_desc[dtm_test_data.tx_cmd.phy]);
+        gecko_cmd_test_dtm_rx( dtm_test_data.rx_cmd.channel,
+                               dtm_test_data.rx_cmd.phy );
 #endif
 }
